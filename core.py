@@ -250,7 +250,7 @@ def osm_contacts(t):
         "linkedin": None}
 
 OVERPASS_MIRRORS = ("https://overpass-api.de/api/interpreter",
-                    "https://overpass.kumi.systems/api/interpreter",
+                    "https://overpass.private.coffee/api/interpreter",  # antigo overpass.kumi.systems
                     "https://overpass.openstreetmap.ru/api/interpreter")
 OVERPASS_SERVER_TIMEOUT = 50   # pedido ao próprio Overpass: falha rápido se a área for grande
 OVERPASS_CLIENT_TIMEOUT = 60   # margem sobre o timeout acima, por mirror
