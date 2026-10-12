@@ -249,6 +249,12 @@ def osm_contacts(t):
         "facebook": soc(t.get("contact:facebook"), "https://facebook.com/"),
         "linkedin": None}
 
+OVERPASS_MIRRORS = ("https://overpass-api.de/api/interpreter",
+                    "https://overpass.kumi.systems/api/interpreter",
+                    "https://overpass.openstreetmap.ru/api/interpreter")
+OVERPASS_SERVER_TIMEOUT = 50   # pedido ao próprio Overpass: falha rápido se a área for grande
+OVERPASS_CLIENT_TIMEOUT = 60   # margem sobre o timeout acima, por mirror
+
 def search_osm(con, category, city, cap=300):
     if "=" in category:
         k, v = category.split("=", 1)
@@ -257,18 +263,25 @@ def search_osm(con, category, city, cap=300):
         if not k:
             raise ValueError(f"Categoria desconhecida: {category} (use a lista ou chave=valor)")
     s, w, n, e = bbox(city)
-    q = f'[out:json][timeout:90];nwr["{k}"~"^({v})$"]["name"]({s},{w},{n},{e});out center tags {cap};'
+    if (n - s) * (e - w) > 0.03:  # ~ maior que um bairro/distrito médio
+        raise ValueError(
+            f'"{city}" parece ser uma área grande demais para o Overpass gratuito responder a '
+            'tempo. Use um bairro específico em vez da cidade inteira (ex.: "Copacabana, Rio de '
+            'Janeiro" em vez de só "Rio de Janeiro").')
+    q = f'[out:json][timeout:{OVERPASS_SERVER_TIMEOUT}];nwr["{k}"~"^({v})$"]["name"]({s},{w},{n},{e});out center tags {cap};'
     last = None
-    for url in ("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"):
+    for url in OVERPASS_MIRRORS:
         try:
-            r = requests.post(url, data={"data": q}, headers=UA, timeout=120)
+            r = requests.post(url, data={"data": q}, headers=UA, timeout=OVERPASS_CLIENT_TIMEOUT)
             r.raise_for_status()
             els = r.json()["elements"]
             break
+        except requests.exceptions.Timeout:
+            last = "o servidor não respondeu a tempo (provavelmente sobrecarregado)"
         except Exception as ex:
             last = ex
     else:
-        raise RuntimeError(f"Overpass indisponível: {last}")
+        raise RuntimeError(f"Overpass indisponível em todos os espelhos: {last}")
     novos = com_site = 0
     for el in els:
         t = el.get("tags", {})
