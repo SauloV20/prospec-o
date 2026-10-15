@@ -277,15 +277,31 @@ def add_lead(con, pid, name, address, phone, maps_url, social, rating, reviews, 
          json.dumps(contacts) if contacts is not None else None, status))
     return cur.rowcount
 
+_last_nominatim_call = [0.0]
+
 def bbox(city):
-    r = requests.get("https://nominatim.openstreetmap.org/search", headers=UA, timeout=30,
-                     params={"q": city, "format": "json", "limit": 1, "countrycodes": "br"})
-    r.raise_for_status()
-    d = r.json()
-    if not d:
-        raise ValueError(f"Local não encontrado: {city}")
-    s, n, w, e = map(float, d[0]["boundingbox"])
-    return s, w, n, e
+    """Geocodifica uma cidade/bairro via Nominatim. Se respeita o limite de 1 pedido por
+    segundo do serviço e tenta de novo (com espera) se vier bloqueio por excesso de uso —
+    útil quando várias buscas são cadastradas em sequência rápida."""
+    last_err = None
+    for attempt in range(4):
+        espera = _last_nominatim_call[0] + 1.1 - time.time()
+        if espera > 0:
+            time.sleep(espera)
+        _last_nominatim_call[0] = time.time()
+        r = requests.get("https://nominatim.openstreetmap.org/search", headers=UA, timeout=30,
+                         params={"q": city, "format": "json", "limit": 1, "countrycodes": "br"})
+        if r.status_code == 429:
+            last_err = "limite de requisições do Nominatim atingido"
+            time.sleep(5 * (attempt + 1))
+            continue
+        r.raise_for_status()
+        d = r.json()
+        if not d:
+            raise ValueError(f"Local não encontrado: {city}")
+        s, n, w, e = map(float, d[0]["boundingbox"])
+        return s, w, n, e
+    raise RuntimeError(f"Nominatim indisponível: {last_err}")
 
 TILE_MAX_AREA = 0.03   # ~ tamanho de um bairro/distrito médio, por quadro
 TILE_MAX_COUNT = 400   # teto de quadros por cidade, para não travar numa área gigante
