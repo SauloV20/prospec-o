@@ -150,6 +150,7 @@ def db():
     CREATE TABLE IF NOT EXISTS queries(id INTEGER PRIMARY KEY, category TEXT, city TEXT,
         active INTEGER DEFAULT 1, last_run TEXT);
     CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v INTEGER DEFAULT 0);
+    CREATE TABLE IF NOT EXISTS geo_cache(city_norm TEXT PRIMARY KEY, s REAL, w REAL, n REAL, e REAL);
     """)
     for col, ddl in (("tiles", "ALTER TABLE queries ADD COLUMN tiles TEXT"),
                      ("tile_index", "ALTER TABLE queries ADD COLUMN tile_index INTEGER DEFAULT 0")):
@@ -303,6 +304,19 @@ def bbox(city):
         return s, w, n, e
     raise RuntimeError(f"Nominatim indisponível: {last_err}")
 
+def bbox_cached(con, city):
+    """Reaproveita a área de uma cidade/bairro já geocodificada por OUTRA busca cadastrada
+    (ex.: duas categorias diferentes na mesma cidade), evitando perguntar de novo ao Nominatim."""
+    key = _norm_cat(city)
+    row = con.execute("SELECT s, w, n, e FROM geo_cache WHERE city_norm=?", (key,)).fetchone()
+    if row:
+        return row["s"], row["w"], row["n"], row["e"]
+    s, w, n, e = bbox(city)
+    con.execute("INSERT OR REPLACE INTO geo_cache(city_norm, s, w, n, e) VALUES(?,?,?,?,?)",
+               (key, s, w, n, e))
+    con.commit()
+    return s, w, n, e
+
 TILE_MAX_AREA = 0.03   # ~ tamanho de um bairro/distrito médio, por quadro
 TILE_MAX_COUNT = 400   # teto de quadros por cidade, para não travar numa área gigante
 GEOAPIFY_TILE_CAP = int(os.environ.get("GEOAPIFY_TILE_CAP", "20"))  # resultados por quadro
@@ -363,7 +377,7 @@ def search_geoapify(con, q):
     categories = geo_category(q["category"])
     tiles = json.loads(q["tiles"]) if q["tiles"] else None
     if not tiles:
-        tiles = split_bbox(*bbox(q["city"]))
+        tiles = split_bbox(*bbox_cached(con, q["city"]))
         con.execute("UPDATE queries SET tiles=?, tile_index=0 WHERE id=?", (json.dumps(tiles), q["id"]))
         con.commit()
         q = dict(q)
