@@ -221,7 +221,16 @@ def gemini(system, user, json_out):
         body["generationConfig"] = {"responseMimeType": "application/json"}
     r = requests.post(url, headers={"x-goog-api-key": env("GEMINI_API_KEY")}, json=body, timeout=90)
     r.raise_for_status()
-    return r.json()["candidates"][0]["content"]["parts"][0]["text"]
+    data = r.json()
+    cands = data.get("candidates") or []
+    if not cands:
+        motivo = (data.get("promptFeedback") or {}).get("blockReason", "sem candidatos retornados")
+        raise RuntimeError(f"Gemini não gerou resposta ({motivo})")
+    parts = (cands[0].get("content") or {}).get("parts") or []
+    if not parts:
+        motivo = cands[0].get("finishReason", "sem conteúdo nas partes")
+        raise RuntimeError(f"Gemini não gerou texto ({motivo})")
+    return parts[0].get("text", "")
 
 def claude(system, user, search, max_tokens):
     body = {"model": os.environ.get("CLAUDE_MODEL", "claude-sonnet-5"), "max_tokens": max_tokens,
@@ -231,7 +240,11 @@ def claude(system, user, search, max_tokens):
     r = requests.post("https://api.anthropic.com/v1/messages", json=body, timeout=120,
                       headers={"x-api-key": env("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01"})
     r.raise_for_status()
-    return "".join(b.get("text", "") for b in r.json()["content"] if b["type"] == "text")
+    data = r.json()
+    texto = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+    if not texto:
+        raise RuntimeError(f"Claude não gerou texto (stop_reason: {data.get('stop_reason')})")
+    return texto
 
 def llm(system, user, json_out=True, search=False, max_tokens=1500):
     """Gemini (grátis) se houver GEMINI_API_KEY; senão Claude. Busca web só com Claude."""

@@ -225,8 +225,14 @@ def leads():
 def lead_detail(lid):
     con = core.db()
     if request.method == "POST":
-        texto = core.proposal(con, lid, request.form.get("reply", ""))
         l = con.execute("SELECT * FROM leads WHERE id=?", (lid,)).fetchone()
+        try:
+            texto = core.proposal(con, lid, request.form.get("reply", ""))
+        except Exception as e:
+            log(f"gerar proposta falhou ({l['name']}): {e}")
+            return page(f"<h2>Não deu pra gerar a proposta — {esc(l['name'])}</h2>"
+                        f"<p>{esc(str(e))}</p>"
+                        f'<a class="btn" href="/leads/{lid}">Voltar e tentar de novo</a>')
         return page(f"<h2>Proposta — {esc(l['name'])}</h2><pre>{esc(texto)}</pre>"
                     f'<a class="btn" href="/leads/{lid}">Voltar</a>')
     l = con.execute("SELECT * FROM leads WHERE id=?", (lid,)).fetchone()
