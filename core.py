@@ -4,7 +4,7 @@ Busca negócios sem site (Geoapify Places primeiro, Google Places para complemen
 escreve as mensagens de apresentação com um LLM (Gemini grátis ou Claude) e controla
 o envio. Dependências: apenas `requests` (e `flask` no server.py).
 """
-import json, math, os, re, smtplib, sqlite3, time, unicodedata, urllib.parse
+import itertools, json, math, os, re, smtplib, sqlite3, time, unicodedata, urllib.parse
 from email.message import EmailMessage
 
 import requests
@@ -55,6 +55,23 @@ def _norm_cat(s):
     return "".join(c for c in s if not unicodedata.combining(c))
 
 CATS_NORM = {_norm_cat(k): v for k, v in CATS.items()}
+
+def _word_variants(w):
+    """Tenta algumas formas de singular comuns em português (restaurantes->restaurante,
+    bares->bar, açougues->açougue), sem acertar todo caso, só os mais comuns."""
+    vs = {w}
+    if w.endswith("es") and len(w) > 4:
+        vs.add(w[:-2])
+    if w.endswith("s") and not w.endswith("ss") and len(w) > 3:
+        vs.add(w[:-1])
+    return vs
+
+def _plural_fallback(norm):
+    words = norm.split()
+    if not 1 <= len(words) <= 6:
+        return
+    for combo in itertools.product(*(_word_variants(w) for w in words)):
+        yield " ".join(combo)
 
 # ===== EDITE AQUI: quem você é e o que oferece =====
 PERFIL = """
@@ -280,7 +297,13 @@ def split_bbox(s, w, n, e, max_area=TILE_MAX_AREA, max_tiles=TILE_MAX_COUNT):
     return tiles
 
 def geo_category(category):
-    c = CATS_NORM.get(_norm_cat(category))
+    norm = _norm_cat(category)
+    c = CATS_NORM.get(norm)
+    if not c:
+        for cand in _plural_fallback(norm):
+            if cand in CATS_NORM:
+                c = CATS_NORM[cand]
+                break
     if c:
         return c
     if "." in category:  # já é uma categoria crua da Geoapify (ex.: catering.restaurant)
